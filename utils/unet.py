@@ -1,3 +1,5 @@
+from .sinusoidal import sinusoidal_embedding
+
 import torch
 from typing import Tuple, List
 
@@ -91,3 +93,70 @@ class UpBlock(torch.nn.Module):
             y = rb(y)
         return y
 
+
+class UNet(torch.nn.Module):
+
+    def __init__(self, image_size: int, noise_embedding_size: int):
+        super(UNet, self).__init__()
+
+        self.image_size = image_size
+        self.noise_embedding_size = noise_embedding_size
+        self.num_channels_initial_conv = 32
+        self.conv_change_input = torch.nn.Conv2d(in_channels=3, out_channels=self.num_channels_initial_conv, kernel_size=1)
+
+        # Noise embeddings
+        self.up = torch.nn.Upsample(size=(image_size, image_size), mode='bilinear', align_corners=False)
+
+        # Down blocks
+        self.down_blocks = [
+            DownBlock(num_channels_input=self.num_channels_initial_conv+self.noise_embedding_size, num_channels_output=32, block_depth=2),
+            DownBlock(num_channels_input=32, num_channels_output=64, block_depth=2),
+            DownBlock(num_channels_input=64, num_channels_output=96, block_depth=2),
+            ]
+
+        # Residual blocks
+        self.residual_blocks = [
+            ResidualBlock(num_channels_input=96, num_channels_output=128),
+            ResidualBlock(num_channels_input=128, num_channels_output=128),
+            ]
+
+        # Up blocks
+        self.up_blocks = [
+            UpBlock(num_channels_input=128, num_channels_output=96, block_depth=2),
+            UpBlock(num_channels_input=96, num_channels_output=64, block_depth=2),
+            UpBlock(num_channels_input=64, num_channels_output=32, block_depth=2),
+            ]
+
+        # Change shape to match image, init to zeros
+        self.conv_change_output = torch.nn.Conv2d(in_channels=32, out_channels=3, kernel_size=1)
+        # Initialize the convolutional layer's weights to zeros, underscore means in-place ie modify the tensor in-place
+        torch.nn.init.zeros_(self.conv_change_output.weight)
+
+    def forward(self, x: torch.Tensor, noise_variances: torch.Tensor) -> torch.Tensor:
+        # Embedding of noise variances
+        noise_embedding = sinusoidal_embedding(noise_variances, noise_embedding_size=self.noise_embedding_size)
+        noise_embedding = self.up(noise_embedding)
+
+        # Change image shape
+        x = self.conv_change_input(x)
+
+        # Concatenate noise embedding
+        x = torch.cat([x, noise_embedding], dim=1)
+        
+        # Down blocks, with skips
+        skips = []
+        for db in self.down_blocks:
+            x = db([x, skips])
+            
+        # Residual blocks
+        for rb in self.residual_blocks:
+            x = rb(x)
+
+        # Up blocks, with skips
+        for ub in self.up_blocks:
+            x = ub([x, skips])
+        
+        # Convolve one more time to change shape back
+        x = self.conv_change_output(x)
+
+        return x
