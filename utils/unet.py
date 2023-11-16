@@ -9,8 +9,8 @@ class ResidualBlock(torch.nn.Module):
 
     def __init__(self, num_channels_input: int, num_channels_output: int):
         super(ResidualBlock, self).__init__()
-        self.input_width = num_channels_input
-        self.width = num_channels_output
+        self.num_channels_input = num_channels_input
+        self.num_channels_output = num_channels_output
 
         # Change num channels from num_channels_input to num_channels_output
         self.conv_change_dim = torch.nn.Conv2d(in_channels=num_channels_input, out_channels=num_channels_output, kernel_size=1)
@@ -32,7 +32,7 @@ class ResidualBlock(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         # Cast into correct shape = width
-        if self.input_width != self.width:
+        if self.num_channels_input != self.num_channels_output:
             residual = self.conv_change_dim(x)
         else:
             residual = x
@@ -73,15 +73,21 @@ class UpBlock(torch.nn.Module):
     def __init__(self, num_channels_input: int, num_channels_output: int, block_depth: int):
         super(UpBlock, self).__init__()
         self.block_depth = block_depth
-        self.rb = ResidualBlock(num_channels_input, num_channels_output)
-        self.up = torch.nn.UpsamplingBilinear2d(size=2)
+        self.rbs = []
+        for i in range(block_depth):
+            num_channels_in = num_channels_input if i == 0 else num_channels_output
+            # Multiply input by 2 => add skip connection
+            num_channels_in *= 2
+            rb = ResidualBlock(num_channels_in, num_channels_output)
+            self.rbs.append(rb)
+        self.up = torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
 
     def forward(self, x: Tuple[torch.Tensor, List]) -> torch.Tensor:
         y, skips = x
         y = self.up(y)
-        for _ in range(self.block_depth):
+        for rb in self.rbs:
             # Catenate along features
             y = torch.cat([y, skips.pop()], dim=1)
-            y = self.rb(y)
+            y = rb(y)
         return y
 

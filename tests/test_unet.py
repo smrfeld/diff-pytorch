@@ -44,4 +44,34 @@ def test_down_block():
 
     assert output.shape == torch.Size([batch_size, num_channels_output, height // 2, width // 2])
 
+def test_up_block():
+    num_channels_input = 3
+    num_channels_output = 6
+    block_depth = 4
+    batch_size = 16
+    height = 8
+    width = 8
+
+    db = DownBlock(
+        num_channels_input=num_channels_input,
+        num_channels_output=num_channels_output,
+        block_depth=block_depth
+        )
     
+    # Input = (batch_size, num_channels, height, width)
+    input_tensor = torch.randn(batch_size, num_channels_input, height, width)
+    skips = []
+    output_tensor = db((input_tensor, skips))
+
+    num_channels_input = output_tensor.shape[1]
+    ub = UpBlock(
+        num_channels_input=num_channels_input,
+        num_channels_output=num_channels_output,
+        block_depth=block_depth
+        )
+    
+    # Input = (batch_size, num_channels, height // 2, width // 2)
+    output = ub((output_tensor, skips))
+
+    assert output.shape == torch.Size([batch_size, num_channels_output, height, width])
+
