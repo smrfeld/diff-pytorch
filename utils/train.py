@@ -30,22 +30,23 @@ class Conf(DataClassDictMixin):
 
 class DiffusionModel:
 
+
     def __init__(self, conf: Conf):
         conf.check_valid()
         self.conf = conf
 
-        # Make data loader for train and val splits
-        self.train_loader, self.val_loader = make_dataloader_image_folder(
-            image_folder=conf.image_folder, 
-            image_size=conf.image_size, 
-            dataset_repetitions=conf.dataset_repetitions, 
-            batch_size=conf.batch_size,
-            validation_split=conf.validation_split,
-            random_seed=conf.random_seed
-            )
-
 
     def train(self):
+
+        # Make data loader for train and val splits
+        train_loader, val_loader = make_dataloader_image_folder(
+            image_folder=self.conf.image_folder, 
+            image_size=self.conf.image_size, 
+            dataset_repetitions=self.conf.dataset_repetitions, 
+            batch_size=self.conf.batch_size,
+            validation_split=self.conf.validation_split,
+            random_seed=self.conf.random_seed
+            )
 
         # Make the model
         model = UNet(
@@ -62,18 +63,18 @@ class DiffusionModel:
 
             # Take a training step
             train_loss = 0.0
-            for input_image_batch in self.train_loader:                
+            for input_image_batch in train_loader:                
                 train_loss += self._train_step(input_image_batch, model, optimizer).item()
             
             # Compute loss from validation set
             val_loss = 0.0
-            for input_image_batch in self.val_loader:
+            for input_image_batch in val_loader:
                 model.eval()
                 val_loss += self._compute_loss(input_image_batch, model).item()
 
             # Average
-            train_loss /= len(self.train_loader)
-            val_loss /= len(self.val_loader)
+            train_loss /= len(train_loader)
+            val_loss /= len(val_loader)
 
             logger.info(f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f}")
 
