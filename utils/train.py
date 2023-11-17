@@ -11,27 +11,27 @@ from PIL import Image
 import numpy as np
 
 
-@dataclass
-class Conf(DataClassDictMixin):
-    num_epochs: int
-    output_dir: str
-    image_folder_train: str
-    image_folder_test: Optional[str] = None
-    image_size: int = 64
-    dataset_repetitions: int = 5
-    batch_size: int = 64
-    noise_embedding_size: int = 32
-    num_epochs: int = 10
-    learning_rate: float = 0.001
-    optimizer: str = "Adam"
-    random_seed: int = 42
-    validation_split: float = 0.2
-
-    def check_valid(self):
-        assert 0 <= self.validation_split <= 1, "validation_split must be between 0 and 1"
-
-
 class DiffusionModel:
+
+
+    @dataclass
+    class Conf(DataClassDictMixin):
+        num_epochs: int
+        output_dir: str
+        image_folder_train: str
+        image_folder_test: Optional[str] = None
+        image_size: int = 64
+        dataset_repetitions: int = 5
+        batch_size: int = 64
+        noise_embedding_size: int = 32
+        num_epochs: int = 10
+        learning_rate: float = 0.001
+        optimizer: str = "Adam"
+        random_seed: int = 42
+        validation_split: float = 0.2
+
+        def check_valid(self):
+            assert 0 <= self.validation_split <= 1, "validation_split must be between 0 and 1"
 
 
     def __init__(self, conf: Conf):
