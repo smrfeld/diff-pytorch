@@ -5,6 +5,24 @@ import torch
 from typing import Tuple
 
 
+def image_preprocess_fn(image_size: int) -> transforms.Compose:
+    return transforms.Compose([
+        transforms.Resize((image_size, image_size)),  # Resize images to a fixed size
+        transforms.RandomHorizontalFlip(),  # Apply random horizontal flip for data augmentation
+        transforms.ToTensor(),  # Convert images to PyTorch tensors
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize with ImageNet statistics
+        ])
+
+
+def image_postprocess_fn() -> transforms.Compose:
+    return transforms.Compose([
+        transforms.Normalize(
+            mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
+            std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
+            )
+        ])
+
+
 def make_dataloader_image_folder(
     image_folder: str, 
     image_size: int = 64, 
@@ -13,13 +31,7 @@ def make_dataloader_image_folder(
     validation_split: float = 0.2, 
     random_seed: int = 42
     ) -> Tuple[DataLoader,DataLoader]:
-
-    transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),  # Resize images to a fixed size
-        transforms.RandomHorizontalFlip(),  # Apply random horizontal flip for data augmentation
-        transforms.ToTensor(),  # Convert images to PyTorch tensors
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize with ImageNet statistics
-        ])
+    transform = image_preprocess_fn(image_size)
     dataset = ImageFolder(root=image_folder, transform=transform)
     
     # Create a list of 'dataset' repeated 'dataset_repetitions' times
