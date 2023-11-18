@@ -51,6 +51,9 @@ class TestDiff:
         assert os.path.exists(diff_train.conf.checkpoint_latest)
         assert os.path.exists(diff_train.conf.checkpoint_init)
 
+        # Clean up
+        self._clear(conf_train)
+    
 
     def test_generate(self, conf_train: DiffusionModel.Conf, conf_test: DiffusionModel.Conf):
         self._clear(conf_train)
@@ -63,3 +66,6 @@ class TestDiff:
             diffusion_steps=20,
             initial_noise=None
             )
+
+        # Clean up
+        self._clear(conf_train)

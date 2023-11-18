@@ -59,7 +59,18 @@ class DiffusionModel:
     def __init__(self, conf: Conf):
         conf.check_valid()
         self.conf = conf
-        self.model = None
+        self.model = UNet(
+            image_size=self.conf.image_size, 
+            noise_embedding_size=self.conf.noise_embedding_size
+            )
+        if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
+            self.load_checkpoint_model(self.conf.checkpoint_latest)
+        elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
+            self.load_checkpoint_model(self.conf.checkpoint_best)
+        elif self.conf.initialize == self.conf.Initialize.FROM_SCRATCH:
+            pass
+        else:
+            raise ValueError(f"Unknown train_from value {self.conf.initialize}")
 
 
     def post_process_images(self, images: torch.Tensor) -> torch.Tensor:
@@ -69,6 +80,8 @@ class DiffusionModel:
 
 
     def generate(self, num_images: int = 1, diffusion_steps: int = 20, initial_noise: Optional[torch.Tensor] = None) -> List[Image.Image]:
+        self.model.eval()
+
         if initial_noise is None:
             initial_noise = torch.randn(
                 size=(num_images, 3, self.conf.image_size, self.conf.image_size)
@@ -79,17 +92,18 @@ class DiffusionModel:
         generated_images = self.post_process_images(generated_images)
 
         # Convert to PIL images
-        generated_images = [
-            Image.fromarray((255.0 * image.numpy()).astype(np.uint8))
-            for image in generated_images
-            ]
+        generated_images_pil = []
+        for i in range(num_images):
+            generated_images_pil.append(
+                Image.fromarray(
+                    np.uint8(generated_images[i].permute(1,2,0).detach().cpu().numpy() * 255)
+                    )
+                )
 
-        return generated_images
+        return generated_images_pil
 
 
     def reverse_diffusion(self, initial_noise: torch.Tensor, diffusion_steps: int) -> torch.Tensor:
-        model = self._make_model_if_needed()
-
         num_images = initial_noise.shape[0]
         step_size = 1.0 / diffusion_steps
         current_images = initial_noise
@@ -103,7 +117,7 @@ class DiffusionModel:
             noise_rates, signal_rates = offset_cosine_diffusion_schedule(diffusion_times)
 
             # Predict the noise
-            pred_noises, pred_images = self.denoise(model, current_images, noise_rates, signal_rates)
+            pred_noises, pred_images = self.denoise(self.model, current_images, noise_rates, signal_rates)
 
             # Predict the next point (t-1) from this one (t): 
             # (1) subtract the current predicted noise to get the predicted image at time (0)
@@ -118,27 +132,6 @@ class DiffusionModel:
         return pred_images
 
 
-    def _make_model_if_needed(self) -> torch.nn.Module:
-        if self.model is None:
-            self.model = UNet(
-                image_size=self.conf.image_size, 
-                noise_embedding_size=self.conf.noise_embedding_size
-                )
-
-            # Load the model from the latest checkpoint
-            if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
-                self.model.load_state_dict(torch.load(self.conf.checkpoint_latest))
-            elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
-                self.model.load_state_dict(torch.load(self.conf.checkpoint_best))
-            else:
-                logger.info("Training from scratch.")
-                
-                # Save the initial model
-                torch.save(self.model.state_dict(), self.conf.checkpoint_init)
-
-        return self.model
-
-
     def train(self):
 
         # Make data loader for train and val splits
@@ -151,21 +144,21 @@ class DiffusionModel:
             random_seed=self.conf.random_seed
             )
 
-        # Make the model
-        model = self._make_model_if_needed()
-
         # Define the optimizer
         optimizer_class = getattr(torch.optim, self.conf.optimizer)
-        optimizer = optimizer_class(model.parameters(), lr=self.conf.learning_rate)
+        optimizer = optimizer_class(self.model.parameters(), lr=self.conf.learning_rate)
 
         # Load the model from the latest checkpoint
         if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
-            epoch_start, val_loss_best = self._load_checkpoint(self.conf.checkpoint_latest, model, optimizer)
+            epoch_start, val_loss_best = self.load_checkpoint_optimizer(self.conf.checkpoint_latest, optimizer)
         elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
-            epoch_start, val_loss_best = self._load_checkpoint(self.conf.checkpoint_best, model, optimizer)
+            epoch_start, val_loss_best = self.load_checkpoint_optimizer(self.conf.checkpoint_best, optimizer)
         elif self.conf.initialize == self.conf.Initialize.FROM_SCRATCH:
             epoch_start = 0
             val_loss_best = float("inf")
+
+            # Write the initial model to disk
+            self._save_checkpoint(epoch_start, optimizer, val_loss_best, self.conf.checkpoint_init)
         else:
             raise ValueError(f"Unknown train_from value {self.conf.initialize}")
 
@@ -175,13 +168,13 @@ class DiffusionModel:
             # Take a training step
             train_loss = 0.0
             for input_image_batch, _ in train_loader:       
-                train_loss += self._train_step(input_image_batch, optimizer, model).item()
+                train_loss += self._train_step(input_image_batch, optimizer).item()
             
             # Compute loss from validation set
             val_loss = 0.0
             for input_image_batch, _ in val_loader:
-                model.eval()
-                val_loss += self._compute_loss(input_image_batch, model).item()
+                self.model.eval()
+                val_loss += self._compute_loss(input_image_batch).item()
 
             # Average
             train_loss /= len(train_loader)
@@ -191,8 +184,8 @@ class DiffusionModel:
             # Check to save
             if val_loss < val_loss_best:
                 val_loss_best = val_loss
-                self._save_checkpoint(epoch, model, optimizer, val_loss_best, self.conf.checkpoint_best)
-            self._save_checkpoint(epoch, model, optimizer, val_loss, self.conf.checkpoint_latest)
+                self._save_checkpoint(epoch, optimizer, val_loss_best, self.conf.checkpoint_best)
+            self._save_checkpoint(epoch, optimizer, val_loss, self.conf.checkpoint_latest)
 
 
     def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:        
@@ -202,25 +195,29 @@ class DiffusionModel:
         return pred_noises, pred_images
 
 
-    def _save_checkpoint(self, epoch: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer, loss: float, fname: str):
+    def _save_checkpoint(self, epoch: int, optimizer: torch.optim.Optimizer, loss: float, fname: str):
         torch.save({
             'epoch': epoch,
-            'model_state_dict': model.state_dict(),
+            'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'loss': loss,
             }, fname)
 
 
-    def _load_checkpoint(self, fname: str, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> Tuple[int,float]:
+    def load_checkpoint_model(self, fname: str):
         checkpoint = torch.load(fname)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+
+
+    def load_checkpoint_optimizer(self, fname: str, optimizer: torch.optim.Optimizer) -> Tuple[int,float]:
+        checkpoint = torch.load(fname)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         epoch = checkpoint['epoch']
         loss = checkpoint['loss']
         return epoch, loss
 
 
-    def _compute_loss(self, images: torch.Tensor, model: torch.nn.Module) -> torch.Tensor:
+    def _compute_loss(self, images: torch.Tensor) -> torch.Tensor:
 
         # Get batch size
         batch_size = images.shape[0]
@@ -236,18 +233,18 @@ class DiffusionModel:
         noisy_images = signal_rates * images + noise_rates * noises
 
         # Predict noise using UNet
-        pred_noises, pred_images = self.denoise(model, noisy_images, noise_rates, signal_rates)
+        pred_noises, pred_images = self.denoise(self.model, noisy_images, noise_rates, signal_rates)
 
         # Compute loss = MSE
         loss = torch.mean((pred_noises - noises)**2)
         return loss
 
 
-    def _train_step(self, images: torch.Tensor, optimizer: torch.optim.Optimizer, model: torch.nn.Module) -> torch.Tensor:
+    def _train_step(self, images: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
         # Train mode
-        model.train()
+        self.model.train()
 
-        loss = self._compute_loss(images, model)
+        loss = self._compute_loss(images)
 
         # Backpropagate
         loss.backward()
