@@ -61,11 +61,13 @@ class TestDiff:
         diff_train.train()
 
         diff_test = self._make_diff(conf_test)
-        diff_test.generate(
+        images = diff_test.generate(
             num_images=1,
             diffusion_steps=20,
             initial_noise=None
             )
+        assert len(images) == 1
+        assert images[0].size == (conf_test.image_size, conf_test.image_size)
 
         # Clean up
         self._clear(conf_train)
