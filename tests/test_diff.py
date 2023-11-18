@@ -14,7 +14,6 @@ def conf_train():
     return DiffusionModel.Conf(
         num_epochs=2,
         output_dir="TMP_output",
-        image_folder_test="images_test",
         image_folder_train="images_train",
         )
 
@@ -23,7 +22,6 @@ def conf_train():
 def conf_test():
     return DiffusionModel.Conf(
         output_dir="TMP_output",
-        image_folder_test="images_test",
         image_folder_train="images_train",
         initialize=DiffusionModel.Conf.Initialize.FROM_BEST_CHECKPOINT
         )

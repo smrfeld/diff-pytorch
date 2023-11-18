@@ -11,6 +11,7 @@ from PIL import Image
 import numpy as np
 import os
 from enum import Enum
+from tqdm import tqdm
 
 
 class DiffusionModel:
@@ -20,22 +21,49 @@ class DiffusionModel:
     class Conf(DataClassDictMixin):
         class Initialize(Enum):
             FROM_LATEST_CHECKPOINT = "from-latest-checkpoint"
+            "Load the model from the latest checkpoint"
+
             FROM_BEST_CHECKPOINT = "from-best-checkpoint"
+            "Load the model from the best checkpoint"
+
             FROM_SCRATCH = "from-scratch"
+            "Initialize the model from scratch"
 
         output_dir: str
+        "Directory where to save checkpoints and generated images"
+
         image_folder_train: str
-        image_folder_test: Optional[str] = None
+        "Directory containing training images"
+
         image_size: int = 64
+        "Size of the images in pixels"
+
         dataset_repetitions: int = 5
+        "Number of times to repeat the dataset"
+
         batch_size: int = 64
+        "Batch size"
+
         noise_embedding_size: int = 32
+        "Size of the noise embedding"
+
         num_epochs: int = 10
+        "Number of epochs to train for"
+
         learning_rate: float = 0.001
+        "Learning rate"
+
         optimizer: str = "Adam"
+        "Optimizer to use"
+
         random_seed: int = 42
+        "Random seed for reproducibility"
+
         validation_split: float = 0.2
+        "Fraction of the dataset to use for validation"
+
         initialize: Initialize = Initialize.FROM_SCRATCH
+        "How to initialize the model"
 
         @property
         def checkpoint_init(self):
@@ -167,12 +195,12 @@ class DiffusionModel:
 
             # Take a training step
             train_loss = 0.0
-            for input_image_batch, _ in train_loader:       
+            for input_image_batch, _ in tqdm(train_loader, desc="Training batch"):
                 train_loss += self._train_step(input_image_batch, optimizer).item()
             
             # Compute loss from validation set
             val_loss = 0.0
-            for input_image_batch, _ in val_loader:
+            for input_image_batch, _ in tqdm(val_loader, desc="Val batch"):
                 self.model.eval()
                 val_loss += self._compute_loss(input_image_batch).item()
 
@@ -205,11 +233,13 @@ class DiffusionModel:
 
 
     def load_checkpoint_model(self, fname: str):
+        logger.debug(f"Loading model weights from {fname}")
         checkpoint = torch.load(fname)
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
 
     def load_checkpoint_optimizer(self, fname: str, optimizer: torch.optim.Optimizer) -> Tuple[int,float]:
+        logger.debug(f"Loading optimizer state from {fname}")
         checkpoint = torch.load(fname)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         epoch = checkpoint['epoch']
