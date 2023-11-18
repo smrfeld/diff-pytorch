@@ -9,6 +9,8 @@ from typing import Tuple, Optional, List
 from loguru import logger
 from PIL import Image
 import numpy as np
+import os
+from enum import Enum
 
 
 class DiffusionModel:
@@ -16,6 +18,12 @@ class DiffusionModel:
 
     @dataclass
     class Conf(DataClassDictMixin):
+
+        class TrainFrom(Enum):
+            FROM_LATEST = "from-latest"
+            FROM_BEST = "from-best"
+            FROM_SCRATCH = "from-scratch"
+
         num_epochs: int
         output_dir: str
         image_folder_train: str
@@ -29,6 +37,22 @@ class DiffusionModel:
         optimizer: str = "Adam"
         random_seed: int = 42
         validation_split: float = 0.2
+        train_from: TrainFrom = TrainFrom.FROM_SCRATCH
+
+        @property
+        def checkpoint_init(self):
+            os.makedirs(self.output_dir, exist_ok=True)
+            return os.path.join(self.output_dir, "init.pth")
+
+        @property
+        def checkpoint_best(self):
+            os.makedirs(self.output_dir, exist_ok=True)
+            return os.path.join(self.output_dir, "best.pth")
+
+        @property
+        def checkpoint_latest(self):
+            os.makedirs(self.output_dir, exist_ok=True)
+            return os.path.join(self.output_dir, "latest.pth")
 
         def check_valid(self):
             assert 0 <= self.validation_split <= 1, "validation_split must be between 0 and 1"
@@ -102,6 +126,18 @@ class DiffusionModel:
                 image_size=self.conf.image_size, 
                 noise_embedding_size=self.conf.noise_embedding_size
                 )
+
+            # Load the model from the latest checkpoint
+            if self.conf.train_from == self.conf.TrainFrom.FROM_LATEST:
+                self.model.load_state_dict(torch.load(self.conf.checkpoint_latest))
+            elif self.conf.train_from == self.conf.TrainFrom.FROM_BEST:
+                self.model.load_state_dict(torch.load(self.conf.checkpoint_best))
+            else:
+                logger.info("Training from scratch.")
+                
+                # Save the initial model
+                torch.save(self.model.state_dict(), self.conf.checkpoint_init)
+
         return self.model
 
 
@@ -124,7 +160,18 @@ class DiffusionModel:
         optimizer_class = getattr(torch.optim, self.conf.optimizer)
         optimizer = optimizer_class(model.parameters(), lr=self.conf.learning_rate)
 
-        for epoch in range(self.conf.num_epochs):
+        # Load the model from the latest checkpoint
+        if self.conf.train_from == self.conf.TrainFrom.FROM_LATEST:
+            epoch_start, val_loss_best = self._load_checkpoint(self.conf.checkpoint_latest, model, optimizer)
+        elif self.conf.train_from == self.conf.TrainFrom.FROM_BEST:
+            epoch_start, val_loss_best = self._load_checkpoint(self.conf.checkpoint_best, model, optimizer)
+        elif self.conf.train_from == self.conf.TrainFrom.FROM_SCRATCH:
+            epoch_start = 0
+            val_loss_best = float("inf")
+        else:
+            raise ValueError(f"Unknown train_from value {self.conf.train_from}")
+
+        for epoch in range(epoch_start, self.conf.num_epochs):
             logger.info(f"Epoch {epoch+1}/{self.conf.num_epochs}")
 
             # Take a training step
@@ -141,8 +188,13 @@ class DiffusionModel:
             # Average
             train_loss /= len(train_loader)
             val_loss /= len(val_loader)
-
             logger.info(f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f}")
+
+            # Check to save
+            if val_loss < val_loss_best:
+                val_loss_best = val_loss
+                self._save_checkpoint(epoch, model, optimizer, val_loss_best, self.conf.checkpoint_best)
+            self._save_checkpoint(epoch, model, optimizer, val_loss, self.conf.checkpoint_latest)
 
 
     def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:        
@@ -150,6 +202,24 @@ class DiffusionModel:
         pred_noises = model(noisy_images, noise_variances)
         pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
         return pred_noises, pred_images
+
+
+    def _save_checkpoint(self, epoch: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer, loss: float, fname: str):
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss,
+            }, fname)
+
+
+    def _load_checkpoint(self, fname: str, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> Tuple[int,float]:
+        checkpoint = torch.load(fname)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        epoch = checkpoint['epoch']
+        loss = checkpoint['loss']
+        return epoch, loss
 
 
     def _compute_loss(self, images: torch.Tensor, model: torch.nn.Module) -> torch.Tensor:
