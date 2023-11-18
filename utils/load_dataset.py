@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader, ConcatDataset, Subset
 import torchvision.transforms as transforms
 import torch
 from typing import Tuple
+from loguru import logger
 
 
 def image_preprocess_fn(image_size: int) -> transforms.Compose:
@@ -31,6 +32,7 @@ def make_dataloader_image_folder(
     validation_split: float = 0.2, 
     random_seed: int = 42
     ) -> Tuple[DataLoader,DataLoader]:
+    logger.debug(f"Loading images from {image_folder}")
     transform = image_preprocess_fn(image_size)
     dataset = ImageFolder(root=image_folder, transform=transform)
     

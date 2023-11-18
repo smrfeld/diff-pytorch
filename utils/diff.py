@@ -18,13 +18,11 @@ class DiffusionModel:
 
     @dataclass
     class Conf(DataClassDictMixin):
-
-        class TrainFrom(Enum):
-            FROM_LATEST = "from-latest"
-            FROM_BEST = "from-best"
+        class Initialize(Enum):
+            FROM_LATEST_CHECKPOINT = "from-latest-checkpoint"
+            FROM_BEST_CHECKPOINT = "from-best-checkpoint"
             FROM_SCRATCH = "from-scratch"
 
-        num_epochs: int
         output_dir: str
         image_folder_train: str
         image_folder_test: Optional[str] = None
@@ -37,7 +35,7 @@ class DiffusionModel:
         optimizer: str = "Adam"
         random_seed: int = 42
         validation_split: float = 0.2
-        train_from: TrainFrom = TrainFrom.FROM_SCRATCH
+        initialize: Initialize = Initialize.FROM_SCRATCH
 
         @property
         def checkpoint_init(self):
@@ -128,9 +126,9 @@ class DiffusionModel:
                 )
 
             # Load the model from the latest checkpoint
-            if self.conf.train_from == self.conf.TrainFrom.FROM_LATEST:
+            if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
                 self.model.load_state_dict(torch.load(self.conf.checkpoint_latest))
-            elif self.conf.train_from == self.conf.TrainFrom.FROM_BEST:
+            elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
                 self.model.load_state_dict(torch.load(self.conf.checkpoint_best))
             else:
                 logger.info("Training from scratch.")
@@ -161,27 +159,27 @@ class DiffusionModel:
         optimizer = optimizer_class(model.parameters(), lr=self.conf.learning_rate)
 
         # Load the model from the latest checkpoint
-        if self.conf.train_from == self.conf.TrainFrom.FROM_LATEST:
+        if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
             epoch_start, val_loss_best = self._load_checkpoint(self.conf.checkpoint_latest, model, optimizer)
-        elif self.conf.train_from == self.conf.TrainFrom.FROM_BEST:
+        elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
             epoch_start, val_loss_best = self._load_checkpoint(self.conf.checkpoint_best, model, optimizer)
-        elif self.conf.train_from == self.conf.TrainFrom.FROM_SCRATCH:
+        elif self.conf.initialize == self.conf.Initialize.FROM_SCRATCH:
             epoch_start = 0
             val_loss_best = float("inf")
         else:
-            raise ValueError(f"Unknown train_from value {self.conf.train_from}")
+            raise ValueError(f"Unknown train_from value {self.conf.initialize}")
 
         for epoch in range(epoch_start, self.conf.num_epochs):
             logger.info(f"Epoch {epoch+1}/{self.conf.num_epochs}")
 
             # Take a training step
             train_loss = 0.0
-            for input_image_batch in train_loader:                
+            for input_image_batch, _ in train_loader:       
                 train_loss += self._train_step(input_image_batch, optimizer, model).item()
             
             # Compute loss from validation set
             val_loss = 0.0
-            for input_image_batch in val_loader:
+            for input_image_batch, _ in val_loader:
                 model.eval()
                 val_loss += self._compute_loss(input_image_batch, model).item()
 
