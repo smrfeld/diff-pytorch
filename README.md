@@ -1,0 +1,1 @@
+Adapted from: [https://github.com/davidADSP/Generative_Deep_Learning_2nd_Edition/blob/b91507a769bc40d87f1428f3eabba11dda6ea8c0/notebooks/08_diffusion/01_ddm/ddm.ipynb#L104](https://github.com/davidADSP/Generative_Deep_Learning_2nd_Edition/blob/b91507a769bc40d87f1428f3eabba11dda6ea8c0/notebooks/08_diffusion/01_ddm/ddm.ipynb#L104)

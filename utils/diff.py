@@ -65,6 +65,12 @@ class DiffusionModel:
         initialize: Initialize = Initialize.FROM_SCRATCH
         "How to initialize the model"
 
+        generate_no_images: int = 5
+        "Number of images to generate"
+
+        generate_diffusion_steps: int = 20
+        "Number of diffusion steps to use when generating"
+
         @property
         def checkpoint_init(self):
             os.makedirs(self.output_dir, exist_ok=True)
@@ -82,6 +88,12 @@ class DiffusionModel:
 
         def check_valid(self):
             assert 0 <= self.validation_split <= 1, "validation_split must be between 0 and 1"
+
+        @property
+        def img_output_dir(self):
+            import datetime
+            now = datetime.datetime.now()
+            return os.path.join(self.output_dir, f"images_{now.strftime('%Y%m%d_%H%M%S')}")
 
 
     def __init__(self, conf: Conf):
@@ -107,13 +119,19 @@ class DiffusionModel:
         return torch.clip(images, 0.0, 1.0)
 
 
-    def generate(self, num_images: int = 1, diffusion_steps: int = 20, initial_noise: Optional[torch.Tensor] = None) -> List[Image.Image]:
+    def generate(self, 
+        num_images: Optional[int] = None, 
+        diffusion_steps: Optional[int] = None, 
+        initial_noise: Optional[torch.Tensor] = None
+        ) -> List[Image.Image]:
         self.model.eval()
 
         if initial_noise is None:
+            num_images = num_images or self.conf.generate_no_images
             initial_noise = torch.randn(
                 size=(num_images, 3, self.conf.image_size, self.conf.image_size)
             )
+        diffusion_steps = diffusion_steps or self.conf.generate_diffusion_steps
         generated_images = self.reverse_diffusion(initial_noise, diffusion_steps)
 
         # Undo the image preprocessing
@@ -121,6 +139,7 @@ class DiffusionModel:
 
         # Convert to PIL images
         generated_images_pil = []
+        num_images = num_images or self.conf.generate_no_images
         for i in range(num_images):
             generated_images_pil.append(
                 Image.fromarray(
@@ -190,6 +209,10 @@ class DiffusionModel:
         else:
             raise ValueError(f"Unknown train_from value {self.conf.initialize}")
 
+        if epoch_start >= self.conf.num_epochs - 1:
+            logger.info("Training already completed")
+            return
+
         for epoch in range(epoch_start, self.conf.num_epochs):
             logger.info(f"Epoch {epoch+1}/{self.conf.num_epochs}")
 
@@ -244,6 +267,7 @@ class DiffusionModel:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         epoch = checkpoint['epoch']
         loss = checkpoint['loss']
+        logger.info(f"Loaded optimizer state from epoch {epoch} with loss {loss}")
         return epoch, loss
 
 
