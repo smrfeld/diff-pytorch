@@ -5,13 +5,14 @@ from .unet import UNet
 from dataclasses import dataclass
 from mashumaro import DataClassDictMixin
 import torch
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict
 from loguru import logger
 from PIL import Image
 import numpy as np
 import os
 from enum import Enum
 from tqdm import tqdm
+import json
 
 
 class DiffusionModel:
@@ -94,6 +95,52 @@ class DiffusionModel:
             import datetime
             now = datetime.datetime.now()
             return os.path.join(self.output_dir, f"images_{now.strftime('%Y%m%d_%H%M%S')}")
+
+        @property
+        def training_metadata_json(self):
+            return os.path.join(self.output_dir, "training_metadata.json")
+
+
+    @dataclass
+    class TrainingMetadata(DataClassDictMixin):
+
+        @dataclass
+        class Metadata(DataClassDictMixin):
+            
+            epoch: int
+            "Epoch number"
+
+            val_loss: float
+            "Validation loss"
+
+            train_loss: float
+            "Training loss"
+
+        epoch_to_metadata: Dict[int, Metadata]
+        "Mapping from epoch number to training metadata"
+
+
+    def load_training_metadata_or_new(self, epoch_start: Optional[int] = None) -> TrainingMetadata:
+        fname = os.path.join(self.conf.output_dir, "training_metadata.json")
+        if os.path.exists(fname):
+            with open(fname, "r") as f:
+                metadata = DiffusionModel.TrainingMetadata.from_dict(json.load(f))
+            logger.info(f"Loaded training metadata from {fname}")
+
+            # Clear epochs that are after the start epoch
+            if epoch_start is not None:
+                metadata.epoch_to_metadata = {
+                    epoch: m for epoch, m in metadata.epoch_to_metadata.items() if epoch < epoch_start
+                    }
+            return metadata
+        else:
+            return DiffusionModel.TrainingMetadata(epoch_to_metadata={})
+
+
+    def _write_training_metadata(self, metadata: TrainingMetadata):
+        with open(self.conf.training_metadata_json, "w") as f:
+            json.dump(metadata.to_dict(), f, indent=3)
+            logger.info(f"Wrote training metadata to {f.name}")
 
 
     def __init__(self, conf: Conf):
@@ -213,6 +260,9 @@ class DiffusionModel:
             logger.info("Training already completed")
             return
 
+        # Load training metadata
+        metadata = self.load_training_metadata_or_new(epoch_start)
+
         for epoch in range(epoch_start, self.conf.num_epochs):
             logger.info(f"Epoch {epoch+1}/{self.conf.num_epochs}")
 
@@ -232,11 +282,19 @@ class DiffusionModel:
             val_loss /= len(val_loader)
             logger.info(f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f}")
 
+            # Store metadata
+            metadata.epoch_to_metadata[epoch] = DiffusionModel.TrainingMetadata.Metadata(
+                epoch=epoch,
+                val_loss=val_loss,
+                train_loss=train_loss
+                )
+
             # Check to save
             if val_loss < val_loss_best:
                 val_loss_best = val_loss
                 self._save_checkpoint(epoch, optimizer, val_loss_best, self.conf.checkpoint_best)
             self._save_checkpoint(epoch, optimizer, val_loss, self.conf.checkpoint_latest)
+            self._write_training_metadata(metadata)
 
 
     def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:        
@@ -295,9 +353,13 @@ class DiffusionModel:
 
 
     def _train_step(self, images: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
+        # Reset gradients
+        optimizer.zero_grad()
+
         # Train mode
         self.model.train()
 
+        # Compute loss
         loss = self._compute_loss(images)
 
         # Backpropagate
