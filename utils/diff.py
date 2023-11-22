@@ -15,13 +15,18 @@ from tqdm import tqdm
 import json
 import time
 import shutil
+import yaml
 
 
 class DiffusionModel:
-
+    """Diffusion model
+    """    
 
     @dataclass
     class Conf(DataClassDictMixin):
+        """Configuration for the diffusion model
+        """        
+
         class Initialize(Enum):
             FROM_LATEST_CHECKPOINT = "from-latest-checkpoint"
             "Load the model from the latest checkpoint"
@@ -74,6 +79,10 @@ class DiffusionModel:
         generate_diffusion_steps: int = 20
         "Number of diffusion steps to use when generating"
 
+        def update_paths(self, mnt_dir: Optional[str]):
+            if mnt_dir is not None:
+                self.image_folder_train = os.path.join(mnt_dir, self.image_folder_train)
+
         @property
         def checkpoint_init(self):
             os.makedirs(self.output_dir, exist_ok=True)
@@ -105,10 +114,14 @@ class DiffusionModel:
 
     @dataclass
     class TrainingMetadata(DataClassDictMixin):
+        """Training metadata
+        """        
 
         @dataclass
         class Metadata(DataClassDictMixin):
-            
+            """Metadata for a single epoch
+            """            
+
             epoch: int
             "Epoch number"
 
@@ -139,12 +152,6 @@ class DiffusionModel:
             return DiffusionModel.TrainingMetadata(epoch_to_metadata={})
 
 
-    def _write_training_metadata(self, metadata: TrainingMetadata):
-        with open(self.conf.training_metadata_json, "w") as f:
-            json.dump(metadata.to_dict(), f, indent=3)
-            logger.info(f"Wrote training metadata to {f.name}")
-
-
     def __init__(self, conf: Conf):
         conf.check_valid()
         self.conf = conf
@@ -153,9 +160,9 @@ class DiffusionModel:
             noise_embedding_size=self.conf.noise_embedding_size
             )
         if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
-            self.load_checkpoint_model(self.conf.checkpoint_latest)
+            self.load_checkpoint(self.conf.checkpoint_latest)
         elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
-            self.load_checkpoint_model(self.conf.checkpoint_best)
+            self.load_checkpoint(self.conf.checkpoint_best)
         elif self.conf.initialize == self.conf.Initialize.FROM_SCRATCH:
             pass
         else:
@@ -246,15 +253,16 @@ class DiffusionModel:
 
         # Load the model from the latest checkpoint
         if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
-            epoch_start, val_loss_best = self.load_checkpoint_optimizer(self.conf.checkpoint_latest, optimizer)
+            epoch_start, val_loss_best = self.load_checkpoint(self.conf.checkpoint_latest, optimizer)
         elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
-            epoch_start, val_loss_best = self.load_checkpoint_optimizer(self.conf.checkpoint_best, optimizer)
+            epoch_start, val_loss_best = self.load_checkpoint(self.conf.checkpoint_best, optimizer)
         elif self.conf.initialize == self.conf.Initialize.FROM_SCRATCH:
             if os.path.exists(self.conf.output_dir):
                 logger.warning("Initializing model from scratch. Erasing output directory. You have 8 seconds.")
                 for _ in tqdm(range(8)):
                     time.sleep(1)
                 shutil.rmtree(self.conf.output_dir)
+            os.makedirs(self.conf.output_dir, exist_ok=True)
 
             epoch_start = 0
             val_loss_best = float("inf")
@@ -271,8 +279,15 @@ class DiffusionModel:
         # Load training metadata
         metadata = self.load_training_metadata_or_new(epoch_start)
 
+        # Copy config file to output directory
+        fname = os.path.join(self.conf.output_dir, "conf.yml")
+        with open(fname, "w") as f:
+            yaml.dump(self.conf.to_dict(), f, indent=3)
+            logger.info(f"Wrote config to {f.name}")
+
         for epoch in range(epoch_start, self.conf.num_epochs):
             logger.info(f"Epoch {epoch+1}/{self.conf.num_epochs}")
+            t0 = time.time()
 
             # Take a training step
             train_loss = 0.0
@@ -280,15 +295,17 @@ class DiffusionModel:
                 train_loss += self._train_step(input_image_batch, optimizer).item()
             
             # Compute loss from validation set
-            val_loss = 0.0
-            for input_image_batch, _ in tqdm(val_loader, desc="Val batch"):
-                self.model.eval()
-                val_loss += self._compute_loss(input_image_batch).item()
+            self.model.eval()
+            with torch.no_grad():
+                val_loss = 0.0
+                for input_image_batch, _ in tqdm(val_loader, desc="Val batch"):
+                    val_loss += self._compute_loss(input_image_batch).item()
 
             # Average
             train_loss /= len(train_loader)
             val_loss /= len(val_loader)
-            logger.info(f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f}")
+            dur = time.time() - t0
+            logger.info(f"Train loss: {train_loss:.4f}, Val loss: {val_loss:.4f} duration: {dur:.2f}s")
 
             # Store metadata
             metadata.epoch_to_metadata[epoch] = DiffusionModel.TrainingMetadata.Metadata(
@@ -321,20 +338,22 @@ class DiffusionModel:
             }, fname)
 
 
-    def load_checkpoint_model(self, fname: str):
-        logger.debug(f"Loading model weights from {fname}")
+    def load_checkpoint(self, fname: str, optimizer: Optional[torch.optim.Optimizer] = None) -> Tuple[int,float]:
+        logger.debug(f"Loading checkpoint from {fname}")
         checkpoint = torch.load(fname)
         self.model.load_state_dict(checkpoint['model_state_dict'])
-
-
-    def load_checkpoint_optimizer(self, fname: str, optimizer: torch.optim.Optimizer) -> Tuple[int,float]:
-        logger.debug(f"Loading optimizer state from {fname}")
-        checkpoint = torch.load(fname)
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if optimizer is not None:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         epoch = checkpoint['epoch']
         loss = checkpoint['loss']
         logger.info(f"Loaded optimizer state from epoch {epoch} with loss {loss}")
         return epoch, loss
+
+
+    def _write_training_metadata(self, metadata: TrainingMetadata):
+        with open(self.conf.training_metadata_json, "w") as f:
+            json.dump(metadata.to_dict(), f, indent=3)
+            logger.info(f"Wrote training metadata to {f.name}")
 
 
     def _compute_loss(self, images: torch.Tensor) -> torch.Tensor:

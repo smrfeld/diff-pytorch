@@ -1,0 +1,16 @@
+---
+
+# Number of epochs to train
+num_epochs: 100
+
+# Output directory
+output_dir: output
+
+# Image folder with test images
+image_folder_test: archive-3/dataset_mini/test
+
+# Image folder with train images
+image_folder_train: archive-3/dataset_mini/train
+
+# How to start training
+initialize: from-best-checkpoint # from-best-checkpoint, from-last-checkpoint, from-scratch
