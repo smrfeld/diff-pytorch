@@ -13,6 +13,8 @@ import os
 from enum import Enum
 from tqdm import tqdm
 import json
+import time
+import shutil
 
 
 class DiffusionModel:
@@ -248,6 +250,12 @@ class DiffusionModel:
         elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
             epoch_start, val_loss_best = self.load_checkpoint_optimizer(self.conf.checkpoint_best, optimizer)
         elif self.conf.initialize == self.conf.Initialize.FROM_SCRATCH:
+            if os.path.exists(self.conf.output_dir):
+                logger.warning("Initializing model from scratch. Erasing output directory. You have 8 seconds.")
+                for _ in tqdm(range(8)):
+                    time.sleep(1)
+                shutil.rmtree(self.conf.output_dir)
+
             epoch_start = 0
             val_loss_best = float("inf")
 

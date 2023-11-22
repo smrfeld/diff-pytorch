@@ -1,0 +1,13 @@
+loguru==0.7.2
+mashumaro==3.10
+matplotlib==3.8.1
+numpy==1.26.2
+Pillow==10.1.0
+Pillow==10.1.0
+plotly==5.18.0
+pytest==7.4.3
+PyYAML==6.0.1
+PyYAML==6.0.1
+torch==2.1.1
+torchvision==0.16.1
+tqdm==4.66.1
