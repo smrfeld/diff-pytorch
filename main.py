@@ -7,7 +7,7 @@ from loguru import logger
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--command", type=str, choices=["plot-schedules", "plot-sinusoidal", "train", "generate", "loss"], required=True)
+    parser.add_argument("--command", type=str, choices=["plot-schedules", "plot-sinusoidal", "train", "generate", "generate-init", "loss"], required=True)
     parser.add_argument("--conf", type=str, required=False)
     parser.add_argument("--mnt-dir", type=str, required=False)
     parser.add_argument("--show", action="store_true", required=False)
@@ -55,13 +55,17 @@ if __name__ == "__main__":
         model = DiffusionModel(conf)
         model.train()
 
-    elif args.command == "generate":
+    elif args.command in ["generate", "generate-init"]:
         from utils import DiffusionModel
 
         assert args.conf is not None, "Must provide a config YAML file with --conf"
         with open(args.conf, "r") as f:
             conf = DiffusionModel.Conf.from_dict(yaml.safe_load(f))
             conf.update_paths(args.mnt_dir)
+
+        conf.initialize = DiffusionModel.Conf.Initialize.FROM_BEST_CHECKPOINT
+        if args.command == "generate-init":
+            conf.initialize = DiffusionModel.Conf.Initialize.FROM_SCRATCH
 
         model = DiffusionModel(conf)
         images = model.generate()
