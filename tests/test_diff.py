@@ -1,12 +1,10 @@
 import sys
 sys.path.append("..")
 
-import torch
-from utils import ResidualBlock, DownBlock, UpBlock, UNet, DiffusionModel
+from utils import DiffusionModel
 import pytest
 import os
 import shutil
-from typing import Generator
 
 
 @pytest.fixture
