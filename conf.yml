@@ -7,10 +7,10 @@ num_epochs: 50
 output_dir: output
 
 # Image folder with test images
-image_folder_test: archive-3/dataset/test
+image_folder_test: test
 
 # Image folder with train images
-image_folder_train: archive-3/dataset/train
+image_folder_train: train
 
 # How to start training
 initialize: from-scratch # from-best-checkpoint, from-last-checkpoint, from-scratch

@@ -76,7 +76,7 @@ class DiffusionModel:
         initialize: Initialize = Initialize.FROM_SCRATCH
         "How to initialize the model"
 
-        generate_no_images: int = 5
+        generate_no_images: int = 20
         "Number of images to generate"
 
         generate_diffusion_steps: int = 20
