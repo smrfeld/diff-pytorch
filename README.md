@@ -43,11 +43,15 @@ Adapted from: [https://github.com/davidADSP/Generative_Deep_Learning_2nd_Edition
     python main.py --conf conf.yml --command train --mnt-dir /path/to/data
     ```
 
+    See `conf.yml` for more options.
+
 * Generate samples:
 
     ```bash
     python main.py --conf conf.yml --command generate
     ```
+
+    See `conf.yml` for more options.
 
 * Plot loss:
 

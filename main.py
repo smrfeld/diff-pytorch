@@ -7,10 +7,10 @@ from loguru import logger
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--command", type=str, choices=["plot-schedules", "plot-sinusoidal", "train", "generate", "generate-init", "loss"], required=True)
-    parser.add_argument("--conf", type=str, required=False)
-    parser.add_argument("--mnt-dir", type=str, required=False)
-    parser.add_argument("--show", action="store_true", required=False)
+    parser.add_argument("--command", type=str, choices=["plot-schedules", "plot-sinusoidal", "train", "generate", "generate-init", "loss"], required=True, help="Command to run. train: train a model. generate: generate images from a trained model. generate-init: generate images from a model initialized from scratch. plot-schedules: plot diffusion schedules. plot-sinusoidal: plot sinusoidal embeddings. loss: plot loss curve.")
+    parser.add_argument("--conf", type=str, required=False, help="Path to config YAML file.")
+    parser.add_argument("--mnt-dir", type=str, required=False, help="Path to mount directory. Dataset is assumed to be relative to this directory.")
+    parser.add_argument("--show", action="store_true", required=False, help="Show plots.")
     args = parser.parse_args()
 
     if args.command == "plot-schedules":
