@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from loguru import logger
 
 
 def sample_batch(dataset):
@@ -27,6 +28,6 @@ def display(
 
     if save_to:
         plt.savefig(save_to)
-        print(f"\nSaved to {save_to}")
+        logger.info(f"\nSaved to {save_to}")
 
     plt.show()

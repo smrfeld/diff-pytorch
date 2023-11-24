@@ -86,7 +86,7 @@ def test_unet():
         noise_embedding_size=32
         )
 
-    # Print summary of model
+    # Summary of model
     # from torchsummary import summary
     # summary(unet, input_size=[(batch_size, 3, image_size, image_size), (batch_size, 1,1,1)])
 

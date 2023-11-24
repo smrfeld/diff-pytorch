@@ -29,6 +29,14 @@ Adapted from: [https://github.com/davidADSP/Generative_Deep_Learning_2nd_Edition
 
 * Data - download from: [https://www.kaggle.com/datasets/nunenuh/pytorch-challange-flower-dataset](https://www.kaggle.com/datasets/nunenuh/pytorch-challange-flower-dataset). Let `/path/to/data` be the path to the folder that contains the `train` and `test` folders.
 
+* Install:
+    
+    ```bash
+    conda create -n diffusion python=3.11
+    conda activate diffusion
+    pip install -r requirements.txt
+    ```
+
 * Training:
 
     ```bash
@@ -48,3 +56,10 @@ Adapted from: [https://github.com/davidADSP/Generative_Deep_Learning_2nd_Edition
     ```
 
 ![](readme_figures/loss.png)
+
+* Tests:
+
+    ```bash
+    cd tests
+    pytest
+    ```
