@@ -7,11 +7,13 @@ def linear_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[torch.Tens
     """Linear diffusion schedule.
 
     Args:
-        diffusion_times (torch.Tensor): Diffusion times.
+        diffusion_times (torch.Tensor): Diffusion times of size (batch_size, 1, 1, 1)
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates.
+        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates of size (batch_size, 1, 1, 1) each.
     """    
+    # Check shape
+    assert diffusion_times.shape == torch.Size([diffusion_times.shape[0], 1, 1, 1]), f"Expected shape (batch_size, 1, 1, 1), got {diffusion_times.shape}"
 
     # Min rate
     min_rate = 0.0001
@@ -35,11 +37,14 @@ def cosine_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[torch.Tens
     """Cosine diffusion schedule.
 
     Args:
-        diffusion_times (torch.Tensor): Diffusion times.
+        diffusion_times (torch.Tensor): Diffusion times of size (batch_size, 1, 1, 1)
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates.
+        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates of size (batch_size, 1, 1, 1) each.
     """    
+    # Check shape
+    assert diffusion_times.shape == torch.Size([diffusion_times.shape[0], 1, 1, 1]), f"Expected shape (batch_size, 1, 1, 1), got {diffusion_times.shape}"
+
     signal_rates = torch.cos(diffusion_times * math.pi / 2)
     noise_rates = torch.sin(diffusion_times * math.pi / 2)
     return noise_rates, signal_rates
@@ -48,11 +53,14 @@ def offset_cosine_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[tor
     """Offset cosine diffusion schedule.
 
     Args:
-        diffusion_times (torch.Tensor): Diffusion times.
+        diffusion_times (torch.Tensor): Diffusion times of size (batch_size, 1, 1, 1)
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates.
+        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates of size (batch_size, 1, 1, 1) each.
     """    
+    # Check shape
+    assert diffusion_times.shape == torch.Size([diffusion_times.shape[0], 1, 1, 1]), f"Expected shape (batch_size, 1, 1, 1), got {diffusion_times.shape}"
+    
     min_signal_rate = torch.tensor(0.02)
     max_signal_rate = torch.tensor(0.95)
     start_angle = torch.acos(max_signal_rate)
