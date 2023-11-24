@@ -8,8 +8,17 @@ class Swish(torch.nn.Module):
         return x * torch.sigmoid(x)
 
 class ResidualBlock(torch.nn.Module):
+    """Residual block.
+    """    
+
 
     def __init__(self, num_channels_input: int, num_channels_output: int):
+        """Constructor.
+
+        Args:
+            num_channels_input (int): Number of input channels.
+            num_channels_output (int): Number of output channels.
+        """        
         super(ResidualBlock, self).__init__()
         self.num_channels_input = num_channels_input
         self.num_channels_output = num_channels_output
@@ -32,6 +41,14 @@ class ResidualBlock(torch.nn.Module):
         self.swish = Swish()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            x (torch.Tensor): Shape (batch_size, num_channels_input, height, width)
+
+        Returns:
+            torch.Tensor: Shape (batch_size, num_channels_output, height, width)
+        """        
 
         # Cast into correct shape = width
         if self.num_channels_input != self.num_channels_output:
@@ -47,10 +64,16 @@ class ResidualBlock(torch.nn.Module):
 
 
 class DownBlock(torch.nn.Module):
+    """Down block: smaller images, more channels.
+    """    
 
     def __init__(self, num_channels_input: int, num_channels_output: int, block_depth: int):
-        """Input shape: (batch_size, num_features, height, width)
-        Output shape: (batch_size, num_features, height // 2, width // 2)
+        """Constructor.
+
+        Args:
+            num_channels_input (int): Number of input channels.
+            num_channels_output (int): Number of output channels.
+            block_depth (int): Number of residual blocks in the down block.
         """
         super(DownBlock, self).__init__()
         self.block_depth = block_depth
@@ -63,6 +86,14 @@ class DownBlock(torch.nn.Module):
         self.avg_pool = torch.nn.AvgPool2d(kernel_size=2)
 
     def forward(self, x: Tuple[torch.Tensor, List]) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            x (Tuple[torch.Tensor, List]): Tuple of (y, skips), where y is the input tensor and skips is a list of tensors from the skip connections. x is of shape (batch_size, num_channels_input, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_channels_output, height // 2, width // 2).
+        """        
         y, skips = x
         for rb in self.rbs:
             y = rb(y)
@@ -72,10 +103,21 @@ class DownBlock(torch.nn.Module):
 
 
 class UpBlock(torch.nn.Module):
+    """Up block: larger images, fewer channels.
+    """    
 
     def __init__(self, num_channels_input_signal: int, num_channels_input_skip: List[int], num_channels_output: int, block_depth: int):
+        """Constructor.
+
+        Args:
+            num_channels_input_signal (int): Number of input channels from the signal. The number of inputs to the residual block is this number plus the number of channels from the skip connections.
+            num_channels_input_skip (List[int]): Number of input channels from the skip connections. Length must match the block_depth. The number of inputs to the residual block is num_channels_input_signal plus this number, for each block.
+            num_channels_output (int): Number of output channels.
+            block_depth (int): Block depth.
+        """        
         super(UpBlock, self).__init__()
         self.block_depth = block_depth
+        assert len(num_channels_input_skip) == block_depth, f"Expected length of num_channels_input_skip to be {block_depth}, got {len(num_channels_input_skip)}"
         rbs = []
         for i in range(block_depth):
             num_channels_in = num_channels_input_signal if i == 0 else num_channels_output
@@ -86,6 +128,14 @@ class UpBlock(torch.nn.Module):
         self.up = torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
 
     def forward(self, x: Tuple[torch.Tensor, List]) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            x (Tuple[torch.Tensor, List]): Tuple of (y, skips), where y is the input tensor and skips is a list of tensors from the skip connections. x is of shape (batch_size, num_channels_input, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_channels_output, height * 2, width * 2).
+        """        
         y, skips = x
         y = self.up(y)
         for rb in self.rbs:
@@ -98,6 +148,13 @@ class UpBlock(torch.nn.Module):
 class UNet(torch.nn.Module):
 
     def __init__(self, image_size: int, noise_embedding_size: int, num_channels_after_img_conv: int = 32):
+        """UNet model.
+
+        Args:
+            image_size (int): Image size.
+            noise_embedding_size (int): Noise embedding size.
+            num_channels_after_img_conv (int, optional): Number of channels to upsample the iamges (3 channels images) to. Defaults to 32.
+        """        
         super(UNet, self).__init__()
 
         self.image_size = image_size
@@ -138,9 +195,20 @@ class UNet(torch.nn.Module):
         torch.nn.init.zeros_(self.conv_change_output.weight)
 
     def forward(self, x: torch.Tensor, noise_variances: torch.Tensor) -> torch.Tensor:
-        # Input shape: 
+        """Forward pass.
+
+        Args:
+            x (torch.Tensor): Input images of size (batch_size, 3, image_size, image_size)
+            noise_variances (torch.Tensor): Noise variances of size (batch_size, 1, 1, 1)
+
+        Returns:
+            torch.Tensor: Output images of size (batch_size, 3, image_size, image_size)
+        """        
+        # Check input shape: 
         # x: (batch_size, 3, image_size, image_size)
+        assert x.shape == torch.Size([x.shape[0], 3, self.image_size, self.image_size]), f"Expected shape {(x.shape[0], 3, self.image_size, self.image_size)}, got {x.shape}"
         # noise_variances: (batch_size, 1, 1, 1) 
+        assert noise_variances.shape == torch.Size([noise_variances.shape[0], 1, 1, 1]), f"Expected shape {(noise_variances.shape[0], 1, 1, 1)}, got {noise_variances.shape}"
 
         # Embedding of noise variances
         noise_embedding = sinusoidal_embedding(noise_variances, noise_embedding_size=self.noise_embedding_size) # (batch_size, noise_embedding_size, 1, 1)
