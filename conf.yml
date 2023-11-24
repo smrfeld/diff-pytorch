@@ -1,22 +1,52 @@
 ---
 
-# Number of epochs to train
-num_epochs: 50
-
-# Output directory
+# Output directory - Directory where to save checkpoints and generated images
 output_dir: output
-
-# Image folder with test images
-image_folder_test: test
 
 # Image folder with train images
 image_folder_train: train
 
-# How to start training
-initialize: from-scratch # from-best-checkpoint, from-last-checkpoint, from-scratch
+# Image folder with test images
+image_folder_test: test
+
+# Device to use for training
+device: mps
+
+# Size of the images in pixels
+image_size: 64
+
+# Number of times to repeat the dataset
+dataset_repetitions: 5
+
+# Batch size
+batch_size: 64
+
+# Size of the noise embedding
+noise_embedding_size: 32
+
+# Number of epochs to train
+num_epochs: 50
 
 # Learning rate
 learning_rate: 0.001
 
-# Number of times to repeat the dataset
-dataset_repetitions: 5
+# Optimizer to use
+optimizer: Adam
+
+# Random seed for reproducibility
+random_seed: 42
+
+# Fraction of the dataset to use for validation
+validation_split: 0.2
+
+# How to start training - from-best-checkpoint, from-last-checkpoint, from-scratch
+initialize: from-scratch # from-best-checkpoint, from-last-checkpoint, from-scratch
+
+# Number of images to generate
+generate_no_images: 20
+
+# Number of diffusion steps to use when generating
+generate_diffusion_steps: 20
+
+# Loss function to use - mse or mae
+loss: mse # mse or mae
