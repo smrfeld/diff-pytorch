@@ -1,7 +1,7 @@
 ---
 
 # Number of epochs to train
-num_epochs: 100
+num_epochs: 50
 
 # Output directory
 output_dir: output
@@ -14,3 +14,9 @@ image_folder_train: archive-3/dataset/train
 
 # How to start training
 initialize: from-scratch # from-best-checkpoint, from-last-checkpoint, from-scratch
+
+# Learning rate
+learning_rate: 0.001
+
+# Number of times to repeat the dataset
+dataset_repetitions: 5

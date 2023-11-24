@@ -97,22 +97,21 @@ class UpBlock(torch.nn.Module):
 
 class UNet(torch.nn.Module):
 
-    def __init__(self, image_size: int, noise_embedding_size: int):
+    def __init__(self, image_size: int, noise_embedding_size: int, num_channels_after_img_conv: int = 32):
         super(UNet, self).__init__()
 
         self.image_size = image_size
         self.noise_embedding_size = noise_embedding_size
-        self.num_channels_initial_conv = 32
-        self.conv_change_input = torch.nn.Conv2d(in_channels=3, out_channels=self.num_channels_initial_conv, kernel_size=1)
+        self.num_channels_after_img_conv = num_channels_after_img_conv
+        self.conv_change_input = torch.nn.Conv2d(in_channels=3, out_channels=num_channels_after_img_conv, kernel_size=1)
 
         # Noise embeddings
         self.noise_embedding_up = torch.nn.Upsample(size=(image_size, image_size), mode='nearest')
 
         # Down blocks
-        # Input size is num_channels_initial_conv from reshaping the image
-        # +1 from the noise embedding after the up layer
+        # Input size is the number of channels in the image + the number of channels in the noise embedding
         down_blocks = [
-            DownBlock(num_channels_input=self.num_channels_initial_conv+1, num_channels_output=32, block_depth=2),
+            DownBlock(num_channels_input=num_channels_after_img_conv+noise_embedding_size, num_channels_output=32, block_depth=2),
             DownBlock(num_channels_input=32, num_channels_output=64, block_depth=2),
             DownBlock(num_channels_input=64, num_channels_output=96, block_depth=2),
             ]
@@ -139,28 +138,41 @@ class UNet(torch.nn.Module):
         torch.nn.init.zeros_(self.conv_change_output.weight)
 
     def forward(self, x: torch.Tensor, noise_variances: torch.Tensor) -> torch.Tensor:
+        # Input shape: 
+        # x: (batch_size, 3, image_size, image_size)
+        # noise_variances: (batch_size, 1, 1, 1) 
+
         # Embedding of noise variances
-        noise_embedding = sinusoidal_embedding(noise_variances, noise_embedding_size=self.noise_embedding_size)
-        noise_embedding = self.noise_embedding_up(noise_embedding)
+        noise_embedding = sinusoidal_embedding(noise_variances, noise_embedding_size=self.noise_embedding_size) # (batch_size, noise_embedding_size, 1, 1)
+        noise_embedding = self.noise_embedding_up(noise_embedding) # (batch_size, noise_embedding_size, image_size, image_size)
+        assert noise_embedding.shape[1] == self.noise_embedding_size
 
         # Change image shape
-        x = self.conv_change_input(x)
+        x = self.conv_change_input(x) # (batch_size, num_channels_after_img_conv, image_size, image_size)
+        assert x.shape[1] == self.num_channels_after_img_conv
 
         # Concatenate noise embedding
-        x = torch.cat([x, noise_embedding], dim=1)
-        
+        x = torch.cat([x, noise_embedding], dim=1) # (batch_size, num_channels_after_img_conv+noise_embedding_size, image_size, image_size)
+        assert x.shape[1] == self.num_channels_after_img_conv + self.noise_embedding_size
+
         # Down blocks, with skips
         skips = []
         for db in self.down_blocks:
             x = db([x, skips])
+        # Assume last block output channels = 96
+        # Shape of x: (batch_size, 96, image_size // 8, image_size // 8)
             
         # Residual blocks
         for rb in self.residual_blocks:
             x = rb(x)
+        # Assume last block output channels = 128
+        # Shape of x: (batch_size, 128, image_size // 8, image_size // 8)
 
         # Up blocks, with skips
         for ub in self.up_blocks:
             x = ub([x, skips])
+        # Assume last block output channels = 32
+        # Shape of x: (batch_size, 32, image_size, image_size)
         
         # Convolve one more time to change shape back
         x = self.conv_change_output(x)

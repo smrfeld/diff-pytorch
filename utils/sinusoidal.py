@@ -2,6 +2,12 @@ import torch
 import math
 
 def sinusoidal_embedding(x: torch.Tensor, noise_embedding_size: int = 32) -> torch.Tensor:
+    # Input shape: x = (batch_size, 1, 1, 1)
+    assert len(x.shape) == 4, f"Expected shape (batch_size, 1, 1, 1), got {x.shape}"
+    assert x.shape[1] == 1, f"Expected shape (batch_size, 1, 1, 1), got {x.shape}"
+    assert x.shape[2] == 1, f"Expected shape (batch_size, 1, 1, 1), got {x.shape}"
+    assert x.shape[3] == 1, f"Expected shape (batch_size, 1, 1, 1), got {x.shape}"
+
     frequencies = torch.exp(
         torch.linspace(
             start=math.log(1.0),
@@ -9,13 +15,16 @@ def sinusoidal_embedding(x: torch.Tensor, noise_embedding_size: int = 32) -> tor
             steps=noise_embedding_size // 2
             )
         )
-    frequencies = frequencies.to(x.device)
+    frequencies = frequencies.to(x.device) # shape = [noise_embedding_size // 2]
     
-    angular_speeds = 2.0 * math.pi * frequencies
-    embeddings = torch.concat([
-        torch.sin(angular_speeds * x), 
-        torch.cos(angular_speeds * x)
-        ], dim=3)
+    angular_speeds = 2.0 * math.pi * frequencies # shape = [noise_embedding_size // 2]
+    
+    # Reshape angular speeds to [1, noise_embedding_size // 2, 1, 1]
+    angular_speeds_reshaped = angular_speeds.unsqueeze(0).unsqueeze(-1).unsqueeze(-1) # shape = [1, noise_embedding_size // 2, 1, 1]
+
+    sin = torch.sin(angular_speeds_reshaped * x) # shape = [batch_size, noise_embedding_size // 2, 1, 1]
+    cos = torch.cos(angular_speeds_reshaped * x) # shape = [batch_size, noise_embedding_size // 2, 1, 1]
+    embeddings = torch.concat([sin,cos], dim=1) # shape = [batch_size, noise_embedding_size, 1, 1]
     return embeddings
 
 

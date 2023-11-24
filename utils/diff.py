@@ -82,6 +82,16 @@ class DiffusionModel:
         generate_diffusion_steps: int = 20
         "Number of diffusion steps to use when generating"
 
+        class Loss(Enum):
+            MSE = "mse"
+            "Mean squared error"
+
+            MAE = "mae"
+            "Mean absolute error"
+
+        loss: Loss = Loss.MSE
+        "Loss function to use"
+
         def update_paths(self, mnt_dir: Optional[str]):
             if mnt_dir is not None:
                 self.image_folder_train = os.path.join(mnt_dir, self.image_folder_train)
@@ -204,9 +214,7 @@ class DiffusionModel:
         num_images = num_images or self.conf.generate_no_images
         for i in range(num_images):
             img_np_arr = generated_images[i].permute(1,2,0).detach().cpu().numpy()
-            print(generated_images[i])
             img_np_arr *= 255
-            print(img_np_arr.shape)
             img_np_arr = np.uint8(img_np_arr)
             img_pil = Image.fromarray(img_np_arr)
             generated_images_pil.append(img_pil)
@@ -333,16 +341,26 @@ class DiffusionModel:
             self._write_training_metadata(metadata)
 
 
-    def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:        
-        noise_variances = noise_rates**2
+    def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:       
+        # Inputs
+        # noisy_images: (batch_size, 3, image_size, image_size)
+        # noise_rates: (batch_size, 1, 1, 1)
+        # signal_rates: (batch_size, 1, 1, 1) 
 
+        # Variances
+        noise_variances = noise_rates**2 # (batch_size, 1, 1, 1)
+
+        # Send to device
         noisy_images = noisy_images.to(self.conf.device)
         noise_variances = noise_variances.to(self.conf.device)
         noise_rates = noise_rates.to(self.conf.device)
         signal_rates = signal_rates.to(self.conf.device)
 
-        pred_noises = model(noisy_images, noise_variances)
-        pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
+        # Predict noise
+        pred_noises = model(noisy_images, noise_variances) # (batch_size, 3, image_size, image_size)
+
+        # Predict image
+        pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates # (batch_size, 3, image_size, image_size)
         return pred_noises, pred_images
 
 
@@ -380,23 +398,30 @@ class DiffusionModel:
         batch_size = images.shape[0]
 
         # Sample diffusion times
-        diffusion_times = torch.rand(batch_size, 1, 1, 1)
-        noise_rates, signal_rates = offset_cosine_diffusion_schedule(diffusion_times)
+        diffusion_times = torch.rand(batch_size, 1, 1, 1) # (batch_size, 1, 1, 1)
+        noise_rates, signal_rates = offset_cosine_diffusion_schedule(diffusion_times) # (batch_size, 1, 1, 1)
         noise_rates = noise_rates.to(self.conf.device)
         signal_rates = signal_rates.to(self.conf.device)
 
         # Sample noise
-        noises = torch.randn(batch_size, 3, self.conf.image_size, self.conf.image_size)
+        noises = torch.randn(batch_size, 3, self.conf.image_size, self.conf.image_size) # (batch_size, 3, image_size, image_size)
         noises = noises.to(self.conf.device)
 
         # Corrupt images
-        noisy_images = signal_rates * images + noise_rates * noises
+        noisy_images = signal_rates * images + noise_rates * noises # (batch_size, 3, image_size, image_size)
 
         # Predict noise using UNet
-        pred_noises, pred_images = self.denoise(self.model, noisy_images, noise_rates, signal_rates)
+        pred_noises, pred_images = self.denoise(self.model, noisy_images, noise_rates, signal_rates) # (batch_size, 3, image_size, image_size)
 
-        # Compute loss = MSE
-        loss = torch.mean((pred_noises - noises)**2)
+        # Compute loss
+        if self.conf.loss == DiffusionModel.Conf.Loss.MSE:
+            # MSE
+            loss = torch.mean((pred_noises - noises)**2)
+        elif self.conf.loss == DiffusionModel.Conf.Loss.MAE:
+            # MAE error
+            loss = torch.mean(torch.abs(pred_noises - noises))
+        else:
+            raise ValueError(f"Unknown loss {self.conf.loss}")
         return loss
 
 
