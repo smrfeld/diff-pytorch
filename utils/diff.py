@@ -148,24 +148,13 @@ class DiffusionModel:
         "Mapping from epoch number to training metadata"
 
 
-    def load_training_metadata_or_new(self, epoch_start: Optional[int] = None) -> TrainingMetadata:
-        fname = os.path.join(self.conf.output_dir, "training_metadata.json")
-        if os.path.exists(fname):
-            with open(fname, "r") as f:
-                metadata = DiffusionModel.TrainingMetadata.from_dict(json.load(f))
-            logger.info(f"Loaded training metadata from {fname}")
-
-            # Clear epochs that are after the start epoch
-            if epoch_start is not None:
-                metadata.epoch_to_metadata = {
-                    epoch: m for epoch, m in metadata.epoch_to_metadata.items() if epoch < epoch_start
-                    }
-            return metadata
-        else:
-            return DiffusionModel.TrainingMetadata(epoch_to_metadata={})
-
-
     def __init__(self, conf: Conf):
+        """Constructor
+
+        Args:
+            conf (Conf): Configuration
+        """        
+
         conf.check_valid()
         self.conf = conf
         self.model = UNet(
@@ -185,10 +174,30 @@ class DiffusionModel:
             raise ValueError(f"Unknown train_from value {self.conf.initialize}")
 
 
-    def post_process_images(self, images: torch.Tensor) -> torch.Tensor:
-        transform = image_postprocess_fn()
-        images = transform(images)
-        return torch.clip(images, 0.0, 1.0)
+    def load_training_metadata_or_new(self, epoch_start: Optional[int] = None) -> TrainingMetadata:
+        """Load training metadata from disk or create a new one
+
+        Args:
+            epoch_start (Optional[int], optional): Start epoch. Info for all epochs before this one will be removed. Defaults to None.
+
+        Returns:
+            TrainingMetadata: Training metadata
+        """        
+
+        fname = os.path.join(self.conf.output_dir, "training_metadata.json")
+        if os.path.exists(fname):
+            with open(fname, "r") as f:
+                metadata = DiffusionModel.TrainingMetadata.from_dict(json.load(f))
+            logger.info(f"Loaded training metadata from {fname}")
+
+            # Clear epochs that are after the start epoch
+            if epoch_start is not None:
+                metadata.epoch_to_metadata = {
+                    epoch: m for epoch, m in metadata.epoch_to_metadata.items() if epoch < epoch_start
+                    }
+            return metadata
+        else:
+            return DiffusionModel.TrainingMetadata(epoch_to_metadata={})
 
 
     def generate(self, 
@@ -196,18 +205,31 @@ class DiffusionModel:
         diffusion_steps: Optional[int] = None, 
         initial_noise: Optional[torch.Tensor] = None
         ) -> List[Image.Image]:
+        """Generate images
+
+        Args:
+            num_images (Optional[int], optional): Number of images to generate. Defaults to None.
+            diffusion_steps (Optional[int], optional): Number of diffusion steps. Defaults to None, in which case the value from the config file is used.
+            initial_noise (Optional[torch.Tensor], optional): Initial noise, of shape (num_images, 3, image_size, image_size). Defaults to None.
+
+        Returns:
+            List[Image.Image]: List of PIL images of length num_images where each image is of size (image_size, image_size)
+        """        
+
         self.model.eval()
 
-        if initial_noise is None:
+        if initial_noise is not None:
+            assert initial_noise.shape == (num_images, 3, self.conf.image_size, self.conf.image_size), f"Expected initial noise of shape (num_images, 3, image_size, image_size), got {initial_noise.shape}"
+        else:
             num_images = num_images or self.conf.generate_no_images
             initial_noise = torch.randn(
                 size=(num_images, 3, self.conf.image_size, self.conf.image_size)
             )
         diffusion_steps = diffusion_steps or self.conf.generate_diffusion_steps
-        generated_images = self.reverse_diffusion(initial_noise, diffusion_steps)
+        generated_images = self._reverse_diffusion(initial_noise, diffusion_steps)
 
         # Undo the image preprocessing
-        generated_images = self.post_process_images(generated_images)
+        generated_images = self._post_process_images(generated_images)
 
         # Convert to PIL images
         generated_images_pil = []
@@ -222,39 +244,9 @@ class DiffusionModel:
         return generated_images_pil
 
 
-    def reverse_diffusion(self, initial_noise: torch.Tensor, diffusion_steps: int) -> torch.Tensor:
-        num_images = initial_noise.shape[0]
-        step_size = 1.0 / diffusion_steps
-        current_images = initial_noise
-        pred_images = None
-        for step in range(diffusion_steps):
-
-            # Compute diffusion times
-            diffusion_times = torch.ones((num_images, 1, 1, 1)) - step * step_size
-
-            # Compute noise and signal rates
-            noise_rates, signal_rates = offset_cosine_diffusion_schedule(diffusion_times)
-
-            # Predict the noise
-            pred_noises, pred_images = self.denoise(self.model, current_images, noise_rates, signal_rates)
-
-            # Predict the next point (t-1) from this one (t): 
-            # (1) subtract the current predicted noise to get the predicted image at time (0)
-            # (2) at that point, compute what the noise would be at the next step (t-1) from the time (0) one
-            # (3) add that noise to the predicted image at time (0) to get the predicted image at time (t-1)
-
-            pred_images = pred_images.to(self.conf.device)
-            next_diffusion_times = diffusion_times - step_size
-            next_noise_rates, next_signal_rates = offset_cosine_diffusion_schedule(next_diffusion_times)
-            next_signal_rates = next_signal_rates.to(self.conf.device)
-            next_noise_rates = next_noise_rates.to(self.conf.device)
-            current_images = next_signal_rates * pred_images + next_noise_rates * pred_noises
-        
-        assert pred_images is not None, "No diffusion steps were performed"
-        return pred_images
-
-
     def train(self):
+        """Train the model.
+        """        
 
         # Make data loader for train and val splits
         train_loader, val_loader = make_dataloader_image_folder(
@@ -341,11 +333,90 @@ class DiffusionModel:
             self._write_training_metadata(metadata)
 
 
-    def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:       
-        # Inputs
+    def load_checkpoint(self, fname: str, optimizer: Optional[torch.optim.Optimizer] = None) -> Tuple[int,float]:
+        """Load a checkpoint
+
+        Args:
+            fname (str): Filename of the checkpoint
+            optimizer (Optional[torch.optim.Optimizer], optional): Optimizer. Defaults to None.
+
+        Returns:
+            Tuple[int,float]: Tuple of epoch and loss
+        """        
+        logger.debug(f"Loading checkpoint from {fname}")
+        checkpoint = torch.load(fname)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        if optimizer is not None:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        epoch = checkpoint['epoch']
+        loss = checkpoint['loss']
+        logger.info(f"Loaded optimizer state from epoch {epoch} with loss {loss}")
+        return epoch, loss
+
+
+    def _reverse_diffusion(self, initial_noise: torch.Tensor, diffusion_steps: int) -> torch.Tensor:
+        """Reverse diffusion
+
+        Args:
+            initial_noise (torch.Tensor): Initial noise, of shape (num_images, 3, image_size, image_size)
+            diffusion_steps (int): Number of diffusion steps
+
+        Returns:
+            torch.Tensor: Predicted images, of shape (num_images, 3, image_size, image_size)
+        """        
+        assert initial_noise.shape == (initial_noise.shape[0], 3, self.conf.image_size, self.conf.image_size), f"Expected initial noise of shape (num_images, 3, image_size, image_size), got {initial_noise.shape}"
+
+        num_images = initial_noise.shape[0]
+        step_size = 1.0 / diffusion_steps
+        current_images = initial_noise
+        pred_images = None
+        for step in range(diffusion_steps):
+
+            # Compute diffusion times
+            diffusion_times = torch.ones((num_images, 1, 1, 1)) - step * step_size
+
+            # Compute noise and signal rates
+            noise_rates, signal_rates = offset_cosine_diffusion_schedule(diffusion_times)
+
+            # Predict the noise
+            pred_noises, pred_images = self._denoise(self.model, current_images, noise_rates, signal_rates)
+
+            # Predict the next point (t-1) from this one (t): 
+            # (1) subtract the current predicted noise to get the predicted image at time (0)
+            # (2) at that point, compute what the noise would be at the next step (t-1) from the time (0) one
+            # (3) add that noise to the predicted image at time (0) to get the predicted image at time (t-1)
+
+            pred_images = pred_images.to(self.conf.device)
+            next_diffusion_times = diffusion_times - step_size
+            next_noise_rates, next_signal_rates = offset_cosine_diffusion_schedule(next_diffusion_times)
+            next_signal_rates = next_signal_rates.to(self.conf.device)
+            next_noise_rates = next_noise_rates.to(self.conf.device)
+            current_images = next_signal_rates * pred_images + next_noise_rates * pred_noises
+        
+        assert pred_images is not None, "No diffusion steps were performed"
+        return pred_images
+
+
+    def _denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:   
+        """Denoise images, i.e. use model to remove noise from images
+
+        Args:
+            model (torch.nn.Module): Model to use for denoising
+            noisy_images (torch.Tensor): Noisy images, of shape (batch_size, 3, image_size, image_size)
+            noise_rates (torch.Tensor): Noise rates, of shape (batch_size, 1, 1, 1)
+            signal_rates (torch.Tensor): Signal rates, of shape (batch_size, 1, 1, 1)
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: Tuple of predicted noise and predicted images, both of shape (batch_size, 3, image_size, image_size)
+        """        
+
+        # Check input sizes
         # noisy_images: (batch_size, 3, image_size, image_size)
+        assert noisy_images.shape == (noisy_images.shape[0], 3, self.conf.image_size, self.conf.image_size), f"Expected noisy images of shape (batch_size, 3, image_size, image_size), got {noisy_images.shape}"
         # noise_rates: (batch_size, 1, 1, 1)
+        assert noise_rates.shape == (noisy_images.shape[0], 1, 1, 1), f"Expected noise rates of shape (batch_size, 1, 1, 1), got {noise_rates.shape}"
         # signal_rates: (batch_size, 1, 1, 1) 
+        assert signal_rates.shape == (noisy_images.shape[0], 1, 1, 1), f"Expected signal rates of shape (batch_size, 1, 1, 1), got {signal_rates.shape}"
 
         # Variances
         noise_variances = noise_rates**2 # (batch_size, 1, 1, 1)
@@ -373,18 +444,6 @@ class DiffusionModel:
             }, fname)
 
 
-    def load_checkpoint(self, fname: str, optimizer: Optional[torch.optim.Optimizer] = None) -> Tuple[int,float]:
-        logger.debug(f"Loading checkpoint from {fname}")
-        checkpoint = torch.load(fname)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        if optimizer is not None:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        epoch = checkpoint['epoch']
-        loss = checkpoint['loss']
-        logger.info(f"Loaded optimizer state from epoch {epoch} with loss {loss}")
-        return epoch, loss
-
-
     def _write_training_metadata(self, metadata: TrainingMetadata):
         with open(self.conf.training_metadata_json, "w") as f:
             json.dump(metadata.to_dict(), f, indent=3)
@@ -392,6 +451,15 @@ class DiffusionModel:
 
 
     def _compute_loss(self, images: torch.Tensor) -> torch.Tensor:
+        """Compute the loss
+
+        Args:
+            images (torch.Tensor): Images, of shape (batch_size, 3, image_size, image_size)
+
+        Returns:
+            torch.Tensor: Loss for the batch of shape (1)
+        """        
+
         images = images.to(self.conf.device)
 
         # Get batch size
@@ -411,7 +479,7 @@ class DiffusionModel:
         noisy_images = signal_rates * images + noise_rates * noises # (batch_size, 3, image_size, image_size)
 
         # Predict noise using UNet
-        pred_noises, pred_images = self.denoise(self.model, noisy_images, noise_rates, signal_rates) # (batch_size, 3, image_size, image_size)
+        pred_noises, pred_images = self._denoise(self.model, noisy_images, noise_rates, signal_rates) # (batch_size, 3, image_size, image_size)
 
         # Compute loss
         if self.conf.loss == DiffusionModel.Conf.Loss.MSE:
@@ -426,6 +494,15 @@ class DiffusionModel:
 
 
     def _train_step(self, images: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
+        """Take a training step
+
+        Args:
+            images (torch.Tensor): Images, of shape (batch_size, 3, image_size, image_size)
+            optimizer (torch.optim.Optimizer): Optimizer
+
+        Returns:
+            torch.Tensor: Loss for the batch of shape (1)
+        """        
         # Reset gradients
         optimizer.zero_grad()
 
@@ -444,3 +521,15 @@ class DiffusionModel:
         return loss
 
 
+    def _post_process_images(self, images: torch.Tensor) -> torch.Tensor:
+        """Post process images, removing normalization and clipping
+
+        Args:
+            images (torch.Tensor): Images, of shape (batch_size, 3, image_size, image_size)
+
+        Returns:
+            torch.Tensor: Post processed images, of shape (batch_size, 3, image_size, image_size)
+        """        
+        transform = image_postprocess_fn()
+        images = transform(images)
+        return torch.clip(images, 0.0, 1.0)

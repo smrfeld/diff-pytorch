@@ -3,6 +3,11 @@ from .diff import DiffusionModel
 import plotly.graph_objects as go
 
 def plot_loss(metadata: DiffusionModel.TrainingMetadata):
+    """Plots the loss over time.
+
+    Args:
+        metadata (DiffusionModel.TrainingMetadata): Training metadata.
+    """    
     epochs = sorted(list(metadata.epoch_to_metadata.keys()))
 
     fig = go.Figure()

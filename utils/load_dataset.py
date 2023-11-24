@@ -7,6 +7,14 @@ from loguru import logger
 
 
 def image_preprocess_fn(image_size: int) -> transforms.Compose:
+    """Image preprocessing function.
+
+    Args:
+        image_size (int): Image size to resize to.
+
+    Returns:
+        transforms.Compose: Image preprocessing function.
+    """    
     return transforms.Compose([
         transforms.Resize((image_size, image_size)),  # Resize images to a fixed size
         transforms.RandomHorizontalFlip(),  # Apply random horizontal flip for data augmentation
@@ -16,6 +24,11 @@ def image_preprocess_fn(image_size: int) -> transforms.Compose:
 
 
 def image_postprocess_fn() -> transforms.Compose:
+    """Image postprocessing function - undoes normalization.
+
+    Returns:
+        transforms.Compose: Image postprocessing function.
+    """    
     return transforms.Compose([
         transforms.Normalize(
             mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
@@ -32,6 +45,20 @@ def make_dataloader_image_folder(
     validation_split: float = 0.2, 
     random_seed: int = 42
     ) -> Tuple[DataLoader,DataLoader]:
+    """Make a DataLoader instance for a folder of images.
+
+    Args:
+        image_folder (str): Folder containing images.
+        image_size (int, optional): Image size. Defaults to 64.
+        dataset_repetitions (int, optional): How many times to repeat dataset. Defaults to 5.
+        batch_size (int, optional): Batch size. Defaults to 64.
+        validation_split (float, optional): Percent to use as validation split. Defaults to 0.2.
+        random_seed (int, optional): Random seed. Defaults to 42.
+
+    Returns:
+        Tuple[DataLoader,DataLoader]: Training and validation DataLoader instances.
+    """    
+
     logger.debug(f"Loading images from {image_folder}")
     transform = image_preprocess_fn(image_size)
     dataset = ImageFolder(root=image_folder, transform=transform)

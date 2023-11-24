@@ -4,6 +4,15 @@ import math
 from dataclasses import dataclass
 
 def linear_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Linear diffusion schedule.
+
+    Args:
+        diffusion_times (torch.Tensor): Diffusion times.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates.
+    """    
+
     # Min rate
     min_rate = 0.0001
     max_rate = 0.02
@@ -23,11 +32,27 @@ def linear_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[torch.Tens
     return noise_rates, signal_rates
 
 def cosine_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Cosine diffusion schedule.
+
+    Args:
+        diffusion_times (torch.Tensor): Diffusion times.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates.
+    """    
     signal_rates = torch.cos(diffusion_times * math.pi / 2)
     noise_rates = torch.sin(diffusion_times * math.pi / 2)
     return noise_rates, signal_rates
 
 def offset_cosine_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Offset cosine diffusion schedule.
+
+    Args:
+        diffusion_times (torch.Tensor): Diffusion times.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Noise rates and signal rates.
+    """    
     min_signal_rate = torch.tensor(0.02)
     max_signal_rate = torch.tensor(0.95)
     start_angle = torch.acos(max_signal_rate)
@@ -42,20 +67,45 @@ def offset_cosine_diffusion_schedule(diffusion_times: torch.Tensor) -> Tuple[tor
 
 @dataclass
 class DiffusionSchedules:
+    T: int
+    "Number of diffusion steps"
+
     diffusion_times: torch.Tensor
+    "Diffusion times of shape (T)"
+
     linear_noise_rates: torch.Tensor
+    "Linear noise rates of shape (T)"
+
     linear_signal_rates: torch.Tensor
+    "Linear signal rates of shape (T)"
+
     cosine_noise_rates: torch.Tensor
+    "Cosine noise rates of shape (T)"
+
     cosine_signal_rates: torch.Tensor
+    "Cosine signal rates of shape (T)"
+
     offset_cosine_noise_rates: torch.Tensor
+    "Offset cosine noise rates of shape (T)"
+
     offset_cosine_signal_rates: torch.Tensor
+    "Offset cosine signal rates of shape (T)"
 
 def create_all_diffusion_schedules(T: int) -> DiffusionSchedules:
-    diffusion_times = torch.tensor([x / T for x in range(T)])
-    lnr, lsr = linear_diffusion_schedule(diffusion_times)
-    cnr, csr = cosine_diffusion_schedule(diffusion_times)
-    ocnr, ocsr = offset_cosine_diffusion_schedule(diffusion_times)
+    """Creates all diffusion schedules.
+
+    Args:
+        T (int): Number of diffusion steps.
+
+    Returns:
+        DiffusionSchedules: Diffusion schedules.
+    """    
+    diffusion_times = torch.tensor([x / T for x in range(T)]) # shape = [T]
+    lnr, lsr = linear_diffusion_schedule(diffusion_times) # shape = [T]
+    cnr, csr = cosine_diffusion_schedule(diffusion_times) # shape = [T]
+    ocnr, ocsr = offset_cosine_diffusion_schedule(diffusion_times) # shape = [T]
     return DiffusionSchedules(
+        T=T,
         diffusion_times=diffusion_times,
         linear_noise_rates=lnr,
         linear_signal_rates=lsr,
@@ -66,40 +116,71 @@ def create_all_diffusion_schedules(T: int) -> DiffusionSchedules:
         )
 
 def plot_diffusion_schedules(ds: DiffusionSchedules):
-    import matplotlib.pyplot as plt
+    """Plots diffusion schedules.
 
-    plt.plot(
-        ds.diffusion_times, ds.linear_signal_rates**2, linewidth=1.5, label="linear"
-    )
-    plt.plot(
-        ds.diffusion_times, ds.cosine_signal_rates**2, linewidth=1.5, label="cosine"
-    )
-    plt.plot(
-        ds.diffusion_times,
-        ds.offset_cosine_signal_rates**2,
-        linewidth=1.5,
-        label="offset_cosine",
-    )
+    Args:
+        ds (DiffusionSchedules): Diffusion schedules.
+    """    
+    import plotly.graph_objs as go
 
-    plt.xlabel("t/T", fontsize=12)
-    plt.ylabel(r"$\bar{\alpha_t}$ (signal)", fontsize=12)
-    plt.legend()
-    plt.show()
+    # Create a figure
+    fig1 = go.Figure()
 
-    plt.plot(
-        ds.diffusion_times, ds.linear_noise_rates**2, linewidth=1.5, label="linear"
-    )
-    plt.plot(
-        ds.diffusion_times, ds.cosine_noise_rates**2, linewidth=1.5, label="cosine"
-    )
-    plt.plot(
-        ds.diffusion_times,
-        ds.offset_cosine_noise_rates**2,
-        linewidth=1.5,
-        label="offset_cosine",
-    )
+    # Add traces for the first set of data
+    fig1.add_trace(go.Scatter(
+        x=ds.diffusion_times,
+        y=ds.linear_signal_rates**2,
+        mode='lines',
+        name='linear'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=ds.diffusion_times,
+        y=ds.cosine_signal_rates**2,
+        mode='lines',
+        name='cosine'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=ds.diffusion_times,
+        y=ds.offset_cosine_signal_rates**2,
+        mode='lines',
+        name='offset_cosine'
+    ))
 
-    plt.xlabel("t/T", fontsize=12)
-    plt.ylabel(r"$1-\bar{\alpha_t}$ (noise)", fontsize=12)
-    plt.legend()
-    plt.show()
+    # Customize layout
+    fig1.update_xaxes(title_text="t/T", tickfont=dict(size=12))
+    fig1.update_yaxes(title_text=r"$\bar{\alpha_t}$ (signal)", tickfont=dict(size=12))
+    fig1.update_layout(legend=dict(title=dict(text='Legend')))
+
+    # Show the plot
+    fig1.show()
+
+    # Create a new figure for the second set of data
+    fig2 = go.Figure()
+
+    # Add traces for the second set of data
+    fig2.add_trace(go.Scatter(
+        x=ds.diffusion_times,
+        y=ds.linear_noise_rates**2,
+        mode='lines',
+        name='linear'
+    ))
+    fig2.add_trace(go.Scatter(
+        x=ds.diffusion_times,
+        y=ds.cosine_noise_rates**2,
+        mode='lines',
+        name='cosine'
+    ))
+    fig2.add_trace(go.Scatter(
+        x=ds.diffusion_times,
+        y=ds.offset_cosine_noise_rates**2,
+        mode='lines',
+        name='offset_cosine'
+    ))
+
+    # Customize layout for the second plot
+    fig2.update_xaxes(title_text="t/T", tickfont=dict(size=12))
+    fig2.update_yaxes(title_text=r"$1-\bar{\alpha_t}$ (noise)", tickfont=dict(size=12))
+    fig2.update_layout(legend=dict(title=dict(text='Legend')))
+
+    # Show the second plot
+    fig2.show()
