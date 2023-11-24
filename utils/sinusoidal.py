@@ -9,6 +9,7 @@ def sinusoidal_embedding(x: torch.Tensor, noise_embedding_size: int = 32) -> tor
             steps=noise_embedding_size // 2
             )
         )
+    frequencies = frequencies.to(x.device)
     
     angular_speeds = 2.0 * math.pi * frequencies
     embeddings = torch.concat([

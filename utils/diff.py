@@ -43,6 +43,9 @@ class DiffusionModel:
         image_folder_train: str
         "Directory containing training images"
 
+        device: str = "mps"
+        "Device to use for training"
+
         image_size: int = 64
         "Size of the images in pixels"
 
@@ -159,6 +162,9 @@ class DiffusionModel:
             image_size=self.conf.image_size, 
             noise_embedding_size=self.conf.noise_embedding_size
             )
+        # Send to device
+        self.model = self.model.to(self.conf.device)
+
         if self.conf.initialize == self.conf.Initialize.FROM_LATEST_CHECKPOINT:
             self.load_checkpoint(self.conf.checkpoint_latest)
         elif self.conf.initialize == self.conf.Initialize.FROM_BEST_CHECKPOINT:
@@ -197,11 +203,13 @@ class DiffusionModel:
         generated_images_pil = []
         num_images = num_images or self.conf.generate_no_images
         for i in range(num_images):
-            generated_images_pil.append(
-                Image.fromarray(
-                    np.uint8(generated_images[i].permute(1,2,0).detach().cpu().numpy() * 255)
-                    )
-                )
+            img_np_arr = generated_images[i].permute(1,2,0).detach().cpu().numpy()
+            print(generated_images[i])
+            img_np_arr *= 255
+            print(img_np_arr.shape)
+            img_np_arr = np.uint8(img_np_arr)
+            img_pil = Image.fromarray(img_np_arr)
+            generated_images_pil.append(img_pil)
 
         return generated_images_pil
 
@@ -227,8 +235,11 @@ class DiffusionModel:
             # (2) at that point, compute what the noise would be at the next step (t-1) from the time (0) one
             # (3) add that noise to the predicted image at time (0) to get the predicted image at time (t-1)
 
+            pred_images = pred_images.to(self.conf.device)
             next_diffusion_times = diffusion_times - step_size
             next_noise_rates, next_signal_rates = offset_cosine_diffusion_schedule(next_diffusion_times)
+            next_signal_rates = next_signal_rates.to(self.conf.device)
+            next_noise_rates = next_noise_rates.to(self.conf.device)
             current_images = next_signal_rates * pred_images + next_noise_rates * pred_noises
         
         assert pred_images is not None, "No diffusion steps were performed"
@@ -324,6 +335,12 @@ class DiffusionModel:
 
     def denoise(self, model: torch.nn.Module, noisy_images: torch.Tensor, noise_rates: torch.Tensor, signal_rates: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:        
         noise_variances = noise_rates**2
+
+        noisy_images = noisy_images.to(self.conf.device)
+        noise_variances = noise_variances.to(self.conf.device)
+        noise_rates = noise_rates.to(self.conf.device)
+        signal_rates = signal_rates.to(self.conf.device)
+
         pred_noises = model(noisy_images, noise_variances)
         pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
         return pred_noises, pred_images
@@ -357,6 +374,7 @@ class DiffusionModel:
 
 
     def _compute_loss(self, images: torch.Tensor) -> torch.Tensor:
+        images = images.to(self.conf.device)
 
         # Get batch size
         batch_size = images.shape[0]
@@ -364,9 +382,12 @@ class DiffusionModel:
         # Sample diffusion times
         diffusion_times = torch.rand(batch_size, 1, 1, 1)
         noise_rates, signal_rates = offset_cosine_diffusion_schedule(diffusion_times)
+        noise_rates = noise_rates.to(self.conf.device)
+        signal_rates = signal_rates.to(self.conf.device)
 
         # Sample noise
         noises = torch.randn(batch_size, 3, self.conf.image_size, self.conf.image_size)
+        noises = noises.to(self.conf.device)
 
         # Corrupt images
         noisy_images = signal_rates * images + noise_rates * noises
